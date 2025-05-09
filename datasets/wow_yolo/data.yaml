@@ -1,0 +1,6 @@
+names:
+  0: gwyx
+path: D:/wow_ai/datasets/wow_yolo
+train: images/train
+val: images/val
+nc: 1
