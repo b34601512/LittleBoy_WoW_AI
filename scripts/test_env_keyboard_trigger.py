@@ -1,15 +1,15 @@
-# D:\wow_ai\scripts\test_env_keyboard_trigger.py
+# D:\wow_ai\scripts\test_env_keyboard_trigger.py (Using 'keyboard' library)
 import cv2
 import numpy as np
 import time
 import sys
 import os
 import traceback
-from pynput import keyboard # 导入pynput用于监听
-import threading # 用于后台监听
+import keyboard # <--- 导入 keyboard 库
+# import threading # 不再需要 threading
 
 # --- 动态路径设置 ---
-# ... (和之前脚本一样) ...
+# ... (保持不变) ...
 try:
     script_path = os.path.abspath(__file__)
     script_dir = os.path.dirname(script_path)
@@ -19,140 +19,131 @@ except NameError: project_root = None
 # --- 路径设置结束 ---
 
 try:
-    from wow_rl.envs.wow_key_env import WowKeyEnv # 导入修改后的 WowKeyEnv
+    # 使用我们上一版本（包含 startWindowThread）的 WowKeyEnv
+    from wow_rl.envs.wow_key_env import WowKeyEnv 
     print("Imported WowKeyEnv successfully.")
 except ImportError as e: print(f"ImportError: {e}"); traceback.print_exc(); sys.exit(1)
 except Exception as e: print(f"Import Error: {e}"); traceback.print_exc(); sys.exit(1)
 
-# --- 全局变量用于线程间通信 ---
-f10_pressed = threading.Event() # F10按键事件
-f11_action = None # F11按键触发的动作
-f11_event = threading.Event() # F11按键事件
-esc_pressed = threading.Event() # ESC按键事件
-listener_thread = None # 监听器线程
-key_listener = None # pynput监听器对象
+# --- 全局变量用于回调函数与主循环通信 ---
+trigger_analysis = False # F10 是否被按下
+action_to_execute = None # 数字键对应的动作
+quit_flag = False      # ESC 是否被按下
 
-# --- 键盘按键处理函数 ---
-def on_press(key):
-    global f11_action, f11_event, f10_pressed, esc_pressed
-    try:
-        # print(f'Key {key} pressed') # 调试用
-        if key == keyboard.Key.f10:
-            print("\n[Listener] F10 detected!")
-            f10_pressed.set() # 设置F10事件
-        elif key == keyboard.Key.esc:
-            print("\n[Listener] ESC detected!")
-            esc_pressed.set() # 设置ESC事件
-            return False # 停止监听器
-        # --- 可以添加F11或其他按键来触发动作 ---
-        # 例如，我们让数字键 0-4 触发对应的 env.step()
-        elif hasattr(key, 'char') and key.char in ['0', '1', '2', '3', '4']:
-            action_num = int(key.char)
-            print(f"\n[Listener] Number key {action_num} detected!")
-            f11_action = action_num # 记录要执行的动作
-            f11_event.set() # 设置动作执行事件
+# --- keyboard 库的回调函数 ---
+def handle_f10():
+    global trigger_analysis
+    print("\n[Callback] F10 detected!")
+    trigger_analysis = True
 
-    except AttributeError:
-        # 处理特殊按键（如果需要）
-        pass
-    except Exception as e:
-        print(f"Error in on_press: {e}")
+def handle_action_key(action_num):
+    global action_to_execute
+    # 检查是否是有效动作编号 (0-4)
+    if 0 <= action_num <= 4:
+         print(f"\n[Callback] Number key {action_num} detected!")
+         action_to_execute = action_num
+    else:
+         print(f"\n[Callback] Ignored number key: {action_num}")
 
-def start_keyboard_listener():
-    global key_listener
-    print("[Main Thread] Starting keyboard listener...")
-    # 创建并启动监听器
-    # non_blocking=True 可能不适用于所有平台，这里使用标准方式
-    # 需要一个单独的线程来运行监听器，防止阻塞主线程
-    with keyboard.Listener(on_press=on_press) as kl:
-         key_listener = kl # 保存监听器对象引用
-         kl.join() # 等待监听器停止（当on_press返回False时）
-    print("[Listener Thread] Keyboard listener stopped.")
 
+def handle_esc():
+    global quit_flag
+    print("\n[Callback] ESC detected!")
+    quit_flag = True
+
+# --- 注册键盘事件钩子 ---
+# 注意：这里直接注册，不需要单独线程
+try:
+    print("Registering keyboard hooks...")
+    keyboard.add_hotkey('f10', handle_f10)
+    # 为数字键 0 到 4 注册钩子
+    for i in range(5):
+         # 使用 lambda 来传递正确的动作编号给处理函数
+         keyboard.add_hotkey(str(i), lambda i=i: handle_action_key(i))
+    keyboard.add_hotkey('esc', handle_esc)
+    print("Keyboard hooks registered.")
+except Exception as e:
+    print(f"ERROR registering keyboard hooks: {e}")
+    print("Please ensure the script is run with administrator privileges.")
+    sys.exit(1)
 
 # --- 主测试函数 ---
 def run_keyboard_test():
-    global listener_thread, f10_pressed, f11_action, f11_event, esc_pressed
+    global trigger_analysis, action_to_execute, quit_flag
     print("Creating WowKeyEnv instance...")
     env = None
     try:
-        # 使用 render_mode="human" 可以在屏幕上看到ROI框
-        env = WowKeyEnv(render_mode="human") 
+        env = WowKeyEnv(render_mode="human") # WowKeyEnv 内部 RS/ES/send_key 仍是启用状态
         print("Environment created.")
-    except Exception as e:
-        print(f"Error creating WowKeyEnv: {e}"); traceback.print_exc(); return
+        print("Performing initial reset...")
+        env.reset()
+        print("Initial reset complete.")
+    except Exception as e: print(f"Error creating or resetting WowKeyEnv: {e}"); traceback.print_exc(); return
 
-    # 启动键盘监听线程
-    listener_thread = threading.Thread(target=start_keyboard_listener, daemon=True)
-    listener_thread.start()
-    time.sleep(1) # 等待监听器启动
-
-    print("\n--- Keyboard Trigger Test Loop ---")
+    print("\n--- Keyboard Trigger Test Loop (using 'keyboard' lib) ---")
     print("INSTRUCTIONS:")
     print("1. Ensure the WoW game window is ACTIVE (has focus).")
     print("2. Press F10 to grab the current screen and analyze the state.")
-    print("3. Press number keys 0-4 to execute the corresponding action:")
-    print("     0: Tab, 1: Shift+Tab, 2: G, 3: F(Attack), 4: No_Op")
+    print("3. Press number keys 0-4 to execute the corresponding action.")
     print("4. Press ESC to quit the script.")
-    print("   (You might need to press ESC multiple times if focus is lost)")
     print("---------------------------------------------------")
 
     try:
-        while not esc_pressed.is_set():
-            # 检查是否有F10事件
-            if f10_pressed.wait(timeout=0.05): # 非阻塞等待0.05秒
+        while not quit_flag:
+            # 检查是否有 F10 触发
+            if trigger_analysis:
                 print("--- F10 Triggered: Analyzing current state ---")
-                current_frame = env.grab.grab() # 获取当前帧
-                analysis_result = env.analyze_state_from_frame(current_frame) # 分析状态
+                current_frame = env.grab.grab()
+                analysis_result = env.analyze_state_from_frame(current_frame) # 调用分析
                 if analysis_result:
                     print("Analysis Result:")
-                    for key, value in analysis_result.items():
-                        print(f"  {key}: {value}")
-                else:
-                    print("State analysis failed.")
-                f10_pressed.clear() # 清除事件，等待下一次按下
+                    for key, value in analysis_result.items(): print(f"  {key}: {value}")
+                else: print("State analysis failed.")
+                trigger_analysis = False # 重置标志
 
-            # 检查是否有动作执行事件 (F11 或 数字键)
-            if f11_event.wait(timeout=0.05):
-                 if f11_action is not None:
-                     print(f"--- Number Key Triggered: Executing action {f11_action} ---")
-                     # 执行动作 (env.step现在只发送按键和截图)
-                     env.step(f11_action) 
-                     print(f"Action {f11_action} executed. Press F10 to see the new state.")
-                     f11_action = None # 重置动作
-                 f11_event.clear() # 清除事件
+            # 检查是否有动作要执行
+            if action_to_execute is not None:
+                action = action_to_execute
+                action_name = env.action_names.get(action, f"action_{action}")
+                print(f"--- Number Key Triggered: Executing action {action} ({action_name}) ---")
+                # 调用 env.step (只发送按键和截图)
+                # 注意：我们暂时不关心 step 返回的 obs/reward 等，因为分析由F10触发
+                env.step(action) 
+                print(f"Action {action} executed. Press F10 to see the new state.")
+                action_to_execute = None # 重置标志
 
-            # 保持窗口响应 (如果 env.render() 不足以保持响应，可以取消注释下面这行)
-            # cv2.waitKey(1) # 极短等待，允许处理窗口消息
+            # 主循环调用 env.render() 来显示窗口并处理其事件
+            # render 内部有 waitKey(30)，会给CPU一些喘息时间
+            if env.render_mode == "human":
+                env.render()
+            
+            # 如果没有渲染，需要加个短暂 sleep 避免空转
+            time.sleep(0.01) 
 
-            # 让主循环稍微休息一下，避免CPU空转过高
-            # time.sleep(0.01) 
+            # (Optional) Check if ESC was pressed directly by render's waitKey
+            # This might be unreliable with the keyboard library hooks active
+            # key = cv2.waitKey(1) & 0xFF
+            # if key == 27:
+            #    print("ESC detected by waitKey in main loop.")
+            #    quit_flag = True
 
-    except KeyboardInterrupt:
-        print("\nCtrl+C detected. Stopping...")
-        esc_pressed.set() # 触发退出
-    except Exception as e:
-        print(f"\nError in main loop:")
-        traceback.print_exc()
+
+    except KeyboardInterrupt: print("\nCtrl+C detected. Stopping...")
+    except Exception as e: print(f"\nError in main loop:"); traceback.print_exc()
     finally:
         print("\n--- Test finished ---")
-        if key_listener is not None:
-             print("Attempting to stop keyboard listener...")
-             # keyboard.Listener.stop() # 可以尝试调用 stop 方法
-             # 或者依赖 esc_pressed 和 on_press 返回 False
-        if listener_thread is not None:
-             listener_thread.join(timeout=1.0) # 等待监听线程结束
-             if listener_thread.is_alive(): print("Warning: Listener thread did not exit.")
+        try:
+            print("Unregistering keyboard hooks...")
+            keyboard.unhook_all() # 注销所有钩子
+        except Exception as e: print(f"Error unhooking keyboard: {e}")
         
         if env is not None:
-             try: env.close(); print("Environment closed.")
-             except Exception as e: print(f"Error closing environment: {e}")
-        
+            try: env.close(); print("Environment closed.")
+            except Exception as e: print(f"Error closing environment: {e}")
         print("Cleanup finished.")
 
-
 if __name__ == "__main__":
-    print("--- Keyboard Triggered Environment Test ---")
-    # 确保脚本有管理员权限可能有助于键盘钩子工作，但通常不需要
-    # input("Press Enter to start...") # 可选：给时间准备
+    print("--- Keyboard Triggered Environment Test (using 'keyboard' lib) ---")
+    print("!!! IMPORTANT: Ensure this script is run with ADMINISTRATOR PRIVILEGES !!!")
+    # input("Press Enter to start...")
     run_keyboard_test()

@@ -15,7 +15,7 @@ class ErrorMessageSensor:
         "no_target": r"D:\wow_ai\data\template_error_no_target.png"
     }
     # 模板匹配的阈值，可能需要根据实际情况微调
-    DEFAULT_MATCH_THRESHOLD = 0.8 
+    DEFAULT_MATCH_THRESHOLD = 0.5 
 
     def __init__(self, roi=DEFAULT_ERROR_ROI, templates_info=DEFAULT_TEMPLATES, threshold=DEFAULT_MATCH_THRESHOLD):
         self.x, self.y, self.w, self.h = roi
@@ -64,6 +64,8 @@ class ErrorMessageSensor:
                 # 其他方法如 TM_SQDIFF_NORMED (值越小越好) 也可以尝试
                 result = cv2.matchTemplate(image_roi, template_img, cv2.TM_CCOEFF_NORMED)
                 min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+
+                print(f"  [ErrorSensor Debug] Template '{identifier}': MaxMatchVal = {max_val:.4f} (Threshold: {self.match_threshold})")
 
                 # print(f"  Template '{identifier}': Max match value = {max_val:.4f}") # 打印匹配值用于调试阈值
 
