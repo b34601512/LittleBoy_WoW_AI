@@ -9,6 +9,8 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset, random_split
 from sklearn.preprocessing import StandardScaler # For normalizing continuous features
+import shutil
+import datetime
 
 # --- 动态路径设置 ---
 try:
@@ -22,21 +24,36 @@ except NameError:
 # --- 路径设置结束 ---
 
 # --- Configuration ---
-DATA_FILENAME = "wow_demo_data_with_heals.pkl"
+# 使用均衡后的数据文件
+DATA_FILENAME = "wow_paladin_demo_balanced.pkl"  # 修改为均衡后的数据文件
 DATA_FILE_PATH = os.path.join(project_root, "data", DATA_FILENAME)
 MODEL_SAVE_PATH = os.path.join(project_root, "runs", "bc_models", "bc_policy_simple.pth")
 SCALER_SAVE_PATH = os.path.join(project_root, "runs", "bc_models", "bc_state_scaler.pkl") # For saving the scaler
+
+# 备份原有模型
+if os.path.exists(MODEL_SAVE_PATH):
+    backup_date = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = MODEL_SAVE_PATH.replace(".pth", f"_backup_{backup_date}.pth")
+    shutil.copy(MODEL_SAVE_PATH, backup_path)
+    print(f"原模型已备份到: {backup_path}")
+
+# 备份原有scaler
+if os.path.exists(SCALER_SAVE_PATH):
+    backup_date = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    scaler_backup_path = SCALER_SAVE_PATH.replace(".pkl", f"_backup_{backup_date}.pkl")
+    shutil.copy(SCALER_SAVE_PATH, scaler_backup_path)
+    print(f"原scaler已备份到: {scaler_backup_path}")
 
 # --- ACTION_MAP for reference (from record_demo.py) ---
 # This defines the number of output neurons for the policy network
 ACTION_MAP_SIZE = 13 # Actions 0 through 12 (no_op to t_healingtouch)
 
 # --- Hyperparameters ---
-INPUT_FEATURE_DIM = 9 # We will construct a 9-dimensional feature vector
+INPUT_FEATURE_DIM = 12 # 更新为12维特征向量，包含额外的特征
 HIDDEN_DIMS = [128, 64] # MLP hidden layers
 LEARNING_RATE = 0.001
 BATCH_SIZE = 64
-NUM_EPOCHS = 50 # Start with a moderate number of epochs
+NUM_EPOCHS = 1 # 修改为1个epoch，因为我们只是想微调模型
 TEST_SPLIT_RATIO = 0.2 # 20% of data for validation
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -65,7 +82,8 @@ def preprocess_state(state_dict):
     # Order of features matters and must be consistent!
     # [sel_flag, is_dead, yolo_prob_target, 
     #  err_face, err_range, err_no_target,
-    #  need_face, need_range, no_target_error]
+    #  need_face, need_range, no_target_error,
+    #  can_loot_target, loot_success_this_frame, need_no_target]
     
     s = state_dict
     feature_vector = [
@@ -77,7 +95,10 @@ def preprocess_state(state_dict):
         float(s.get('errors_dict', {}).get('no_target', 0)),
         float(s.get('need_face', False)), # bools converted to float (0.0 or 1.0)
         float(s.get('need_range', False)),
-        float(s.get('no_target_error', False))
+        float(s.get('no_target_error', False)),
+        float(s.get('can_loot_target', 0)),
+        float(s.get('loot_success_this_frame', 0)),
+        float(s.get('need_no_target', False))
     ]
     if len(feature_vector) != INPUT_FEATURE_DIM:
         raise ValueError(f"Feature vector length mismatch! Expected {INPUT_FEATURE_DIM}, got {len(feature_vector)}")
@@ -92,7 +113,7 @@ def train_bc_policy():
 
     try:
         with open(DATA_FILE_PATH, "rb") as f:
-            recorded_data = pickle.load(f) # List of (state_dict, action_id)
+            recorded_data = pickle.load(f) # 新格式: List of (frame, state_dict, action_id)
         print(f"Successfully loaded {len(recorded_data)} data points.")
     except Exception as e:
         print(f"Error loading data: {e}"); return
@@ -104,14 +125,33 @@ def train_bc_policy():
     print("Preprocessing data...")
     all_features = []
     all_labels = []
-    for state_dict, action_id in recorded_data:
-        try:
-            features = preprocess_state(state_dict)
-            all_features.append(features)
-            all_labels.append(action_id)
-        except Exception as e:
-            print(f"Skipping data point due to preprocessing error: {e}. State: {state_dict}")
-            continue
+    
+    # 检查数据格式
+    sample_item = recorded_data[0]
+    if isinstance(sample_item, tuple) and len(sample_item) == 3:
+        print("Detected new data format: (frame, state_dict, action_id)")
+        # 处理三元组格式
+        for frame, state_dict, action_id in recorded_data:
+            try:
+                features = preprocess_state(state_dict)
+                all_features.append(features)
+                all_labels.append(action_id)
+            except Exception as e:
+                print(f"Skipping data point due to preprocessing error: {e}. State: {state_dict}")
+                continue
+    elif isinstance(sample_item, tuple) and len(sample_item) == 2:
+        print("Detected old data format: (state_dict, action_id)")
+        # 处理二元组格式
+        for state_dict, action_id in recorded_data:
+            try:
+                features = preprocess_state(state_dict)
+                all_features.append(features)
+                all_labels.append(action_id)
+            except Exception as e:
+                print(f"Skipping data point due to preprocessing error: {e}. State: {state_dict}")
+                continue
+    else:
+        print(f"Unknown data format: {type(sample_item)}"); return
     
     if not all_features:
         print("No valid data points after preprocessing. Exiting."); return

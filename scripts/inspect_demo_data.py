@@ -2,6 +2,7 @@
 import pickle
 import os
 import sys
+import numpy as np
 
 # --- 动态路径设置 (与 record_demo.py 类似，确保能找到项目根目录) ---
 try:
@@ -53,10 +54,30 @@ def inspect_data(file_path):
     
     print(f"\nShowing first {num_samples_to_show} samples:")
     for i in range(num_samples_to_show):
-        state_dict, action_id = recorded_data[i]
-        action_name = ACTION_ID_TO_NAME_REFERENCE.get(action_id, "Unknown Action ID")
+        # 首先检查数据结构
+        data_item = recorded_data[i]
         print(f"\n--- Sample {i+1} ---")
+        
+        # 适应不同的数据格式
+        if isinstance(data_item, tuple) and len(data_item) == 2:
+            # 旧格式: (state_dict, action_id)
+            state_dict, action_id = data_item
+            print(f"  Format: Old (state_dict, action_id)")
+        elif isinstance(data_item, tuple) and len(data_item) == 3:
+            # 新格式可能是: (frame, state_dict, action_id)
+            frame, state_dict, action_id = data_item
+            print(f"  Format: New (frame, state_dict, action_id)")
+            print(f"  Frame shape: {frame.shape if hasattr(frame, 'shape') else type(frame)}")
+        else:
+            print(f"  Unknown data format: {type(data_item)}")
+            print(f"  Data preview: {str(data_item)[:100]}")
+            continue
+        
+        # 显示动作ID和名称
+        action_name = ACTION_ID_TO_NAME_REFERENCE.get(action_id, f"Unknown ID {action_id}")
         print(f"  Action ID: {action_id} (Means: '{action_name}')")
+        
+        # 显示状态字典
         print(f"  State Dictionary (Keys and types/shapes):")
         if isinstance(state_dict, dict):
             for key, value in state_dict.items():
@@ -68,10 +89,26 @@ def inspect_data(file_path):
 
     if len(recorded_data) > num_samples_to_show:
         print(f"\nShowing last sample (Sample {len(recorded_data)}):")
-        state_dict, action_id = recorded_data[-1]
-        action_name = ACTION_ID_TO_NAME_REFERENCE.get(action_id, "Unknown Action ID")
+        
+        # 同样适应不同的数据格式
+        data_item = recorded_data[-1]
         print(f"\n--- Sample {len(recorded_data)} ---")
+        
+        if isinstance(data_item, tuple) and len(data_item) == 2:
+            state_dict, action_id = data_item
+            print(f"  Format: Old (state_dict, action_id)")
+        elif isinstance(data_item, tuple) and len(data_item) == 3:
+            frame, state_dict, action_id = data_item
+            print(f"  Format: New (frame, state_dict, action_id)")
+            print(f"  Frame shape: {frame.shape if hasattr(frame, 'shape') else type(frame)}")
+        else:
+            print(f"  Unknown data format: {type(data_item)}")
+            print(f"  Data preview: {str(data_item)[:100]}")
+            return
+        
+        action_name = ACTION_ID_TO_NAME_REFERENCE.get(action_id, f"Unknown ID {action_id}")
         print(f"  Action ID: {action_id} (Means: '{action_name}')")
+        
         print(f"  State Dictionary (Keys and types/shapes):")
         if isinstance(state_dict, dict):
             for key, value in state_dict.items():
@@ -83,8 +120,15 @@ def inspect_data(file_path):
             
     # Count action occurrences
     action_counts = {}
-    for _, action_id in recorded_data:
-        action_counts[action_id] = action_counts.get(action_id, 0) + 1
+    for item in recorded_data:
+        if isinstance(item, tuple):
+            if len(item) == 2:
+                _, action_id = item
+            elif len(item) == 3:
+                _, _, action_id = item
+            else:
+                continue
+            action_counts[action_id] = action_counts.get(action_id, 0) + 1
     
     print("\n--- Action Distribution ---")
     for action_id, count in sorted(action_counts.items()):
@@ -92,4 +136,18 @@ def inspect_data(file_path):
         print(f"  Action {action_id} ('{action_name}'): {count} occurrences")
 
 if __name__ == "__main__":
-    inspect_data(DATA_FILE_PATH)
+    # 处理命令行参数
+    if len(sys.argv) > 1:
+        # 如果提供了完整路径
+        if os.path.exists(sys.argv[1]):
+            custom_file_path = sys.argv[1]
+        # 如果只提供了文件名
+        elif os.path.exists(os.path.join(project_root, "data", sys.argv[1])):
+            custom_file_path = os.path.join(project_root, "data", sys.argv[1]) 
+        else:
+            print(f"WARNING: File not found at {sys.argv[1]}")
+            print(f"Falling back to default: {DATA_FILE_PATH}")
+            custom_file_path = DATA_FILE_PATH
+        inspect_data(custom_file_path)
+    else:
+        inspect_data(DATA_FILE_PATH)

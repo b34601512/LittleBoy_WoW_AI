@@ -10,12 +10,22 @@ class ErrorMessageSensor:
     # 定义模板文件路径和对应的标识符
     # 请确保这些路径与你保存的模板文件名一致
     DEFAULT_TEMPLATES = {
+        # 原有的错误模板
         "face": r"D:\wow_ai\data\template_error_face.png",
         "range": r"D:\wow_ai\data\template_error_range.png",
-        "no_target": r"D:\wow_ai\data\template_error_no_target.png"
+        "no_target": r"D:\wow_ai\data\template_error_no_target.png",
+        "cant_attack_target": r"D:\wow_ai\data\cant_attack_target.png",
+        
+        # 新增的错误模板 - 用户最新截图
+        "facing_wrong_way": r"D:\wow_ai\data\you_are_facing_the_wrong_way.png",  # 面朝错误方向
+        "spell_not_ready": r"D:\wow_ai\data\spell_is_not_ready_yet.png",          # 法术没准备好/技能冷却
+        "too_far_away": r"D:\wow_ai\data\you_are_too_far_away.png",              # 你距离太远(与range类似但不同措辞)
+        "player_dead": r"D:\wow_ai\data\you_are_dead.png",                       # 玩家死亡状态
+        "cannot_attack_while_dead": r"D:\wow_ai\data\you_cannot_attack_while_dead.png",  # 死亡状态不能攻击
+        "no_attackable_target": r"D:\wow_ai\data\template_error_no_attackable_target.png"  # 没有可攻击目标
     }
     # 模板匹配的阈值，可能需要根据实际情况微调
-    DEFAULT_MATCH_THRESHOLD = 0.5 
+    DEFAULT_MATCH_THRESHOLD = 0.51 
 
     def __init__(self, roi=DEFAULT_ERROR_ROI, templates_info=DEFAULT_TEMPLATES, threshold=DEFAULT_MATCH_THRESHOLD):
         self.x, self.y, self.w, self.h = roi
